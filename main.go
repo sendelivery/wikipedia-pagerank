@@ -2,40 +2,65 @@ package main
 
 import (
 	"fmt"
-	"sync"
+	"log"
+	"net/http"
 
-	urls "github.com/sendelivery/wikipedia-pagerank/internal"
+	"github.com/sendelivery/wikipedia-pagerank/internal/article"
+	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
+	"github.com/sendelivery/wikipedia-pagerank/internal/urls"
+	"golang.org/x/net/html"
 )
 
+const NUM_CONCURRENT_FETCHES = 50
+const NUM_PAGES = 10_000
+
+var fetched map[string]bool = make(map[string]bool)
+
 func main() {
-	c := make(chan struct{}, 5)
-	defer close(c)
-
-	statusCh := make(chan int, len(urls.URLs))
-
-	var wg sync.WaitGroup
-	wg.Add(len(urls.URLs))
-
-	for i, url := range urls.URLs {
-		c <- struct{}{} // acquire a slot
-
-		go func(url string, i int) {
-			defer wg.Done()
-			defer func() { <-c }() // release a slot
-
-			fmt.Printf("Fetch #%d: %s\n", i, url)
-			statusCh <- urls.FetchAndGetStatusCode(url)
-		}(url, i)
+	parentArticlePath := urls.InputWikipediaArticlePath()
+	valid := urls.IsValidWikiPath(parentArticlePath)
+	if !valid {
+		log.Fatalf("Invalid Wikipedia path: %s\nPlease try again.", parentArticlePath)
 	}
 
-	wg.Wait()
-	close(statusCh)
+	// Create an unbuffered channel that we'll use as a queue to hold all the pages we have yet to
+	// fetch.
+	// queue := make(chan string)
 
-	count := 0
-	for code := range statusCh {
-		if code == 200 {
-			count++
+	// Create a buffered channel that will hold all of the URLs we are concurrently fetching at any
+	// given time while building our corpus.
+	fetching := make(chan string, NUM_CONCURRENT_FETCHES)
+	fetching <- parentArticlePath
+
+	// `corp` will hold the corpus of wikipedia pages we're building.
+	corp := corpus.MakeCorpus(NUM_PAGES)
+
+	// We'll use this to stop the main goroutine until our corpus has been completed.
+	// Todo: use context instead?
+	// var wg sync.WaitGroup
+	// wg.Add(NUM_PAGES)
+
+	for link := range fetching {
+		fmt.Printf("Fetching link %s\n", link)
+		resp, err := http.Get(urls.BaseURL + link)
+		if err != nil {
+			log.Fatalf("failed to fetch %s with error %e", link, err)
 		}
+
+		fmt.Println("Parsing response body")
+		articleHtml, err := html.Parse(resp.Body)
+		if err != nil {
+			log.Fatalf("failed to parse html for %s with error %e", link, err)
+		}
+
+		fmt.Println("Getting wiki links from article")
+		links := article.GetWikipediaArticleLinks(articleHtml)
+		corp[link] = links
+
+		// Close fetching channel so we can exit the loop
+		close(fetching)
 	}
-	fmt.Printf("%d/%d URLs returned status code 200\n", count, len(urls.URLs))
+
+	fmt.Println(corp)
+	fmt.Println(len(corp["/wiki/Go_(programming_language)"]))
 }
