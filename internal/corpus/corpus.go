@@ -1,11 +1,10 @@
 package corpus
 
 import (
-	"errors"
-	"math/rand"
+	"golang.org/x/sync/syncmap"
 )
 
-type Corpus map[string][]string
+type Corpus = syncmap.Map
 
 // An unknown page in our corpus is a link for which there is no corresponding entry in the corpus.
 // I.e. page A might link to pages B, C, and D. B might link to C, and C to A and D. However, D does not
@@ -13,26 +12,26 @@ type Corpus map[string][]string
 // unknown page. We need to decide how to deal with such pages.
 
 // Read-only method, we won't be modifying the map so a value receiver is fine.
-func (c Corpus) GetRandomLink(page string) (string, error) {
-	links, ok := c[page]
+// func (c Corpus) GetRandomLink(page string) (string, error) {
+// 	links, ok := c[page]
 
-	if !ok {
-		return "", errors.New("page does not exist in corpus")
-	}
+// 	if !ok {
+// 		return "", errors.New("page does not exist in corpus")
+// 	}
 
-	i := rand.Intn(len(links))
-	link := links[i]
+// 	i := rand.Intn(len(links))
+// 	link := links[i]
 
-	// Todo: should we ensure that our corpus is valid? (i.e. no unknown pages)
-	// Alternatively, we could loop until we find a known link,
-	// or have our pagerank algorithm deal with unknown pages...
-	if _, ok := c[link]; !ok {
-		return "", errors.New("link does not exist in corpus")
-	}
+// 	// Todo: should we ensure that our corpus is valid? (i.e. no unknown pages)
+// 	// Alternatively, we could loop until we find a known link,
+// 	// or have our pagerank algorithm deal with unknown pages...
+// 	if _, ok := c[link]; !ok {
+// 		return "", errors.New("link does not exist in corpus")
+// 	}
 
-	return link, nil
-}
+// 	return link, nil
+// }
 
 func MakeCorpus(size int) Corpus {
-	return make(Corpus, size)
+	return Corpus{}
 }

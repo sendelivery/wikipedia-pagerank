@@ -20,7 +20,7 @@ func InputWikipediaArticlePath() string {
 	path := "/wiki/Go_(programming_language)"
 	for _, r := range path {
 		fmt.Printf("%c", r)
-		d := time.Duration(rand.IntN(80) + 20)
+		d := time.Duration(rand.IntN(20) + 20)
 		time.Sleep(d * time.Millisecond)
 	}
 	fmt.Println()
@@ -34,9 +34,20 @@ func IsValidWikiPath(url string) bool {
 	return re.Match([]byte(url))
 }
 
-func FetchURL(url string) (*http.Response, error) {
-	response, err := http.Get(url)
-	return response, err
+func GetArticleHTML(path string) (*html.Node, error) {
+	fmt.Printf("Fetching link %s\n", path)
+	resp, err := http.Get(BaseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch %s with error %s", path, err.Error())
+	}
+
+	fmt.Println("Parsing response body")
+	articleHtml, err := html.Parse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse html for %s with error %e", path, err)
+	}
+
+	return articleHtml, nil
 }
 
 type Corpus struct {

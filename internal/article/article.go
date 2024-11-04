@@ -8,7 +8,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-func GetWikipediaArticleLinks(article *html.Node) []string {
+func GetWikipediaArticlePaths(article *html.Node) []string {
 	links := make([]string, 0)
 
 	/*
@@ -27,9 +27,9 @@ func GetWikipediaArticleLinks(article *html.Node) []string {
 		if node.Type == html.ElementNode && node.Data == "a" {
 			link, err := getLinkFromATag(node)
 			if err != nil {
-				fmt.Printf("error when getting link: %e\n", err)
+				// fmt.Printf("error when getting link: %e\n", err)
 			} else if !urls.IsValidWikiPath(link) {
-				fmt.Printf("not a valid wiki article url %s\n", link)
+				// fmt.Printf("not a valid wiki article url %s\n", link)
 			} else {
 				links = append(links, link)
 			}
@@ -40,12 +40,13 @@ func GetWikipediaArticleLinks(article *html.Node) []string {
 		}
 	}
 
+	fmt.Println("Scraping wikipedia links from HTML")
 	traverseNodes(article)
 	return links
 }
 
 func getLinkFromATag(tag *html.Node) (string, error) {
-	fmt.Println(tag.Attr)
+	// fmt.Println(tag.Attr)
 	for i := 0; i < len(tag.Attr); i++ {
 		attr := tag.Attr[i]
 		if attr.Key == "href" {
