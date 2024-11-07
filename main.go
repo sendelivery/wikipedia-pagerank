@@ -12,7 +12,7 @@ import (
 )
 
 const NUM_CONCURRENT_FETCHES = 50
-const NUM_PAGES = 1_001
+const NUM_PAGES = 101
 
 var fetched sync.Map
 
@@ -73,7 +73,7 @@ func main() {
 
 				fmt.Printf("%s has %d wikipedia links\n", path, len(paths))
 
-				corp.Store(path, paths)
+				corp.Set(path, paths)
 				fetched.Store(path, true)
 
 				for _, p := range paths {
@@ -93,71 +93,54 @@ func main() {
 		wg.Wait()
 	}
 
-	count := 0
-	urls := make([]string, NUM_PAGES/2)
-	corp.Range(func(key, value any) bool {
-		count++
-		url, ok := key.(string)
-		if !ok {
-			return false
-		}
+	// Must set cap of urls to the number of pages in the corpus or else the ForEach will overwrite
+	// the pointer of the inner slice, and `urls` will be empty.
+	urls := make([]string, 0, corp.Size())
+	corp.ForEach(func(url string, _ []string) {
 		urls = append(urls, url)
-		return true
 	})
 
 	slices.SortFunc(urls, func(a, b string) int {
-		aVal, _ := corp.Load(a)
-		bVal, _ := corp.Load(b)
+		aArr, _ := corp.Get(a)
+		bArr, _ := corp.Get(b)
 
-		aValArr, ok := aVal.([]string)
-		if !ok {
-			return 0
-		}
-		bValArr, ok := bVal.([]string)
-		if !ok {
-			return 0
-		}
-
-		return len(bValArr) - len(aValArr)
+		return len(bArr) - len(aArr)
 	})
 
-	a, ok := corp.Load(urls[0])
+	a, ok := corp.Get(urls[0])
 	if !ok {
-		fmt.Println("a")
+		fmt.Println("a", a, ok, urls[0])
 		return
 	}
-	b, ok := corp.Load(urls[1])
+	b, ok := corp.Get(urls[1])
 	if !ok {
-		fmt.Println("b")
+		fmt.Println("b", b, ok, urls[1])
 		return
 	}
-	c, ok := corp.Load(urls[3])
+	c, ok := corp.Get(urls[3])
 	if !ok {
-		fmt.Println("c")
-		return
-	}
-
-	aArr, ok := a.([]string)
-	if !ok {
-		fmt.Println("aArr")
-		return
-	}
-	bArr, ok := b.([]string)
-	if !ok {
-		fmt.Println("bArr")
-		return
-	}
-	cArr, ok := c.([]string)
-	if !ok {
-		fmt.Println("cArr")
+		fmt.Println("c", c, ok, urls[2])
 		return
 	}
 
-	fmt.Printf("Scraped %d articles.\n", count)
+	fmt.Printf("Scraped %d articles.\n", corp.Size())
+
+	// fmt.Println("-- Before consistency check --")
+	fmt.Println("Total links in corpus:", corp.GetTotalLinks())
 	fmt.Println("Top three articles:")
-	fmt.Printf("1. %s with %d links\n", urls[0], len(aArr))
-	fmt.Printf("2. %s with %d links\n", urls[1], len(bArr))
-	fmt.Printf("3. %s with %d links\n", urls[2], len(cArr))
+	fmt.Printf("1. %s with %s as last link\n", urls[0], a[len(a)-1])
+	fmt.Printf("2. %s with %s as last link\n", urls[1], b[len(b)-1])
+	fmt.Printf("3. %s with %s as last link\n", urls[2], c[len(c)-1])
+
+	corp.EnsureConsistency()
+	corp.CheckConsistency()
+
+	fmt.Println("-- Corpus is consistent --")
+	fmt.Println("Total links in corpus:", corp.GetTotalLinks())
+	fmt.Println("Top three articles:")
+	fmt.Printf("1. %s with %s as last link\n", urls[0], a[len(a)-1])
+	fmt.Printf("2. %s with %s as last link\n", urls[1], b[len(b)-1])
+	fmt.Printf("3. %s with %s as last link\n", urls[2], c[len(c)-1])
 
 }
 
@@ -185,15 +168,5 @@ for i, url := range urls.URLs {
 
 wg.Wait()
 close(statusCh)
-
-*/
-
-/*
-
-Scraped 764 articles.
-Top three articles:
-1. /wiki/Republican_Party_(United_States) with 3399 links
-2. /wiki/Zeus with 3380 links
-3. /wiki/Russian_invasion_of_Ukraine with 3034 links
 
 */
