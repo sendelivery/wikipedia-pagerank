@@ -3,95 +3,96 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"slices"
 	"sync"
+	"time"
 
-	"github.com/sendelivery/wikipedia-pagerank/internal/article"
 	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
-	"github.com/sendelivery/wikipedia-pagerank/internal/urls"
+	"github.com/sendelivery/wikipedia-pagerank/internal/reporter"
+	"github.com/sendelivery/wikipedia-pagerank/internal/scraper"
 )
 
-const NUM_CONCURRENT_FETCHES = 50
-const NUM_PAGES = 101
+const NUM_CONCURRENT_FETCHES = 5
+const NUM_PAGES = 50
 
-var fetched sync.Map
+// InputWikipediaArticlePath prompts the user to input a Wikipedia article path
+// and returns that path.
+func InputWikipediaArticlePath() string {
+	fmt.Printf("Enter a Wikipedia URL: https://en.wikipedia.org")
+	time.Sleep(500)
+	path := "/wiki/Go_(programming_language)"
+	for _, r := range path {
+		fmt.Printf("%c", r)
+		d := time.Duration(rand.IntN(20) + 20)
+		time.Sleep(d * time.Millisecond)
+	}
+	fmt.Println()
+	return path
+}
 
 func main() {
-	parentArticlePath := urls.InputWikipediaArticlePath()
-	valid := urls.IsValidWikiPath(parentArticlePath)
+	parentArticlePath := InputWikipediaArticlePath()
+	valid := scraper.IsValidWikiPath(parentArticlePath)
 	if !valid {
 		log.Fatalf("Invalid Wikipedia path: %s\nPlease try again.", parentArticlePath)
 	}
 
-	// Create an huge buffered channel that we'll use as a queue to hold all the pages we have yet
-	// to fetch.
+	r := reporter.New()
+
+	// Create a buffered channel that we'll use as a queue to hold all the pages we have yet to
+	// fetch.
 	queue := make(chan string, NUM_PAGES)
 	queue <- parentArticlePath
 
 	// `corp` will hold the corpus of wikipedia pages we're building.
-	corp := corpus.MakeCorpus(NUM_PAGES)
+	corp := corpus.New(NUM_PAGES)
 
-	// Temporary: close queue after 10 seconds
-	// go func() {
-	// 	time.Sleep(10 * time.Second)
-	// 	close(queue)
-	// }()
+	r.NewWorkInProgress("Building corpus")
 
-	// Todo: make this loop go until the corpus is NUM_PAGES long
-	for i := 0; i < NUM_PAGES/NUM_CONCURRENT_FETCHES; i++ {
-		// We'll use this to stop our loop until all current 50 fetches and parses have completed.
+	for corp.Size() < NUM_PAGES {
+		if len(queue) == 0 {
+			// fmt.Println("Queue is empty... exiting.")
+			return
+		}
+
+		numStartGoroutines := min(len(queue), NUM_CONCURRENT_FETCHES, NUM_PAGES-corp.Size())
+
 		var wg sync.WaitGroup
-		wg.Add(NUM_CONCURRENT_FETCHES)
+		wg.Add(numStartGoroutines)
 
-		for i := NUM_CONCURRENT_FETCHES; i > 0; i-- {
-			var path string
-
-			select {
-			case path = <-queue: // acquire a path
-			default:
-				fmt.Println("queue is empty")
-				wg.Done()
-				continue
-			}
-
-			if _, ok := fetched.Load(path); ok {
-				wg.Done()
-				continue
-			}
-
-			// create a goroutine to fetch, parse, and extract wikipedia links from that path
+		for i := numStartGoroutines; i > 0; i-- {
 			go func() {
 				defer wg.Done()
 
-				articleHtml, err := urls.GetArticleHTML(path)
+				path := <-queue
+				articles, err := scraper.ScrapeArticlesInWikipediaArticle(path)
 				if err != nil {
-					fmt.Println(err)
+					// fmt.Println("error when fetching path:", path, "\nwith:", err)
 					return
 				}
 
-				paths := article.GetWikipediaArticlePaths(articleHtml)
+				corp.Set(path, articles)
 
-				fmt.Printf("%s has %d wikipedia links\n", path, len(paths))
-
-				corp.Set(path, paths)
-				fetched.Store(path, true)
-
-				for _, p := range paths {
-					if _, ok := fetched.Load(p); ok {
+				for _, articlePath := range articles {
+					if _, ok := corp.Get(articlePath); ok {
 						continue
 					}
 					select {
-					case queue <- p:
+					case queue <- articlePath:
 					default:
-						goto exit_loop // queue is full
+						// Queue is full.
+						goto end_goroutine
 					}
 				}
-			exit_loop:
+			end_goroutine:
 			}()
 		}
 
 		wg.Wait()
 	}
+
+	r.Stop()
 
 	// Must set cap of urls to the number of pages in the corpus or else the ForEach will overwrite
 	// the pointer of the inner slice, and `urls` will be empty.
@@ -100,6 +101,21 @@ func main() {
 		urls = append(urls, url)
 	})
 
+	fmt.Println("------ Before enforcing consistency ------")
+	printTopThreeArticles(&corp, urls)
+
+	r.NewWorkInProgress("Enforcing corpus consistency")
+	corp.EnsureConsistency()
+	corp.CheckConsistency()
+	r.Stop()
+
+	fmt.Println("------ After enforcing consistency ------")
+	printTopThreeArticles(&corp, urls)
+
+	fmt.Println("size of corpus:", corp.Size())
+}
+
+func printTopThreeArticles(corp *corpus.Corpus, urls []string) {
 	slices.SortFunc(urls, func(a, b string) int {
 		aArr, _ := corp.Get(a)
 		bArr, _ := corp.Get(b)
@@ -125,48 +141,9 @@ func main() {
 
 	fmt.Printf("Scraped %d articles.\n", corp.Size())
 
-	// fmt.Println("-- Before consistency check --")
 	fmt.Println("Total links in corpus:", corp.GetTotalLinks())
 	fmt.Println("Top three articles:")
-	fmt.Printf("1. %s with %s as last link\n", urls[0], a[len(a)-1])
-	fmt.Printf("2. %s with %s as last link\n", urls[1], b[len(b)-1])
-	fmt.Printf("3. %s with %s as last link\n", urls[2], c[len(c)-1])
-
-	corp.EnsureConsistency()
-	corp.CheckConsistency()
-
-	fmt.Println("-- Corpus is consistent --")
-	fmt.Println("Total links in corpus:", corp.GetTotalLinks())
-	fmt.Println("Top three articles:")
-	fmt.Printf("1. %s with %s as last link\n", urls[0], a[len(a)-1])
-	fmt.Printf("2. %s with %s as last link\n", urls[1], b[len(b)-1])
-	fmt.Printf("3. %s with %s as last link\n", urls[2], c[len(c)-1])
-
+	fmt.Printf("1. %s with %d links, last link: %s\n", urls[0], len(a), a[len(a)-1])
+	fmt.Printf("2. %s with %d links, last link: %s\n", urls[1], len(b), b[len(b)-1])
+	fmt.Printf("3. %s with %d links, last link: %s\n", urls[2], len(c), c[len(c)-1])
 }
-
-/*
-
-c := make(chan struct{}, 5)
-defer close(c)
-
-statusCh := make(chan int, len(urls.URLs))
-
-var wg sync.WaitGroup
-wg.Add(len(urls.URLs))
-
-for i, url := range urls.URLs {
-	c <- struct{}{} // acquire a slot
-
-	go func(url string, i int) {
-		defer wg.Done()
-		defer func() { <-c }() // release a slot
-
-		fmt.Printf("Fetch #%d: %s\n", i, url)
-		statusCh <- urls.FetchAndGetStatusCode(url)
-	}(url, i)
-}
-
-wg.Wait()
-close(statusCh)
-
-*/
