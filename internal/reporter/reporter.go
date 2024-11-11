@@ -1,5 +1,9 @@
 package reporter
 
+// TODO: Update this package so that successive calls to `NewWorkInProgress` cancel previous
+// calls. In other words, No more than one `NewWorkInProgress`, without having to explicitly
+// call `Stop`.
+
 import (
 	"fmt"
 	"time"
@@ -18,13 +22,13 @@ func (r *Reporter) NewWorkInProgress(label string) {
 	go func() {
 		defer fmt.Println()
 		for {
-			time.Sleep(500 * time.Millisecond)
 			select {
 			case <-r.quit:
 				return
 			default:
 				fmt.Print(".")
 			}
+			time.Sleep(1 * time.Second)
 		}
 	}()
 }

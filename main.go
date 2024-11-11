@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
+	"github.com/sendelivery/wikipedia-pagerank/internal/pagerank"
 	"github.com/sendelivery/wikipedia-pagerank/internal/reporter"
 	"github.com/sendelivery/wikipedia-pagerank/internal/scraper"
 )
 
-const NUM_CONCURRENT_FETCHES = 5
-const NUM_PAGES = 50
+const NUM_CONCURRENT_FETCHES = 100
+const NUM_PAGES = 1000
 
 // InputWikipediaArticlePath prompts the user to input a Wikipedia article path
 // and returns that path.
 func InputWikipediaArticlePath() string {
 	fmt.Printf("Enter a Wikipedia URL: https://en.wikipedia.org")
 	time.Sleep(500)
-	path := "/wiki/Go_(programming_language)"
+	path := "/wiki/Albert_Camus"
 	for _, r := range path {
 		fmt.Printf("%c", r)
 		d := time.Duration(rand.IntN(20) + 20)
@@ -38,8 +39,6 @@ func main() {
 		log.Fatalf("Invalid Wikipedia path: %s\nPlease try again.", parentArticlePath)
 	}
 
-	r := reporter.New()
-
 	// Create a buffered channel that we'll use as a queue to hold all the pages we have yet to
 	// fetch.
 	queue := make(chan string, NUM_PAGES)
@@ -48,6 +47,7 @@ func main() {
 	// `corp` will hold the corpus of wikipedia pages we're building.
 	corp := corpus.New(NUM_PAGES)
 
+	r := reporter.New()
 	r.NewWorkInProgress("Building corpus")
 
 	for corp.Size() < NUM_PAGES {
@@ -101,21 +101,20 @@ func main() {
 		urls = append(urls, url)
 	})
 
-	fmt.Println("------ Before enforcing consistency ------")
-	printTopThreeArticles(&corp, urls)
-
 	r.NewWorkInProgress("Enforcing corpus consistency")
-	corp.EnsureConsistency()
-	corp.CheckConsistency()
+	corp.EnforceConsistency()
 	r.Stop()
 
-	fmt.Println("------ After enforcing consistency ------")
-	printTopThreeArticles(&corp, urls)
+	r.NewWorkInProgress("Calculating pagerank")
+	pr := pagerank.CalculatePagerank(&corp)
+	r.Stop()
 
-	fmt.Println("size of corpus:", corp.Size())
+	fmt.Println()
+	fmt.Println("Size of corpus:", corp.Size())
+	printResults(&corp, urls, pr)
 }
 
-func printTopThreeArticles(corp *corpus.Corpus, urls []string) {
+func printResults(corp *corpus.Corpus, urls []string, pr map[string]float64) {
 	slices.SortFunc(urls, func(a, b string) int {
 		aArr, _ := corp.Get(a)
 		bArr, _ := corp.Get(b)
@@ -139,11 +138,36 @@ func printTopThreeArticles(corp *corpus.Corpus, urls []string) {
 		return
 	}
 
-	fmt.Printf("Scraped %d articles.\n", corp.Size())
+	prSortedUrls := slices.Clone(urls)
+	slices.SortFunc(prSortedUrls, func(a, b string) int {
+		rankA := pr[a]
+		rankB := pr[b]
 
-	fmt.Println("Total links in corpus:", corp.GetTotalLinks())
-	fmt.Println("Top three articles:")
+		if rankA < rankB {
+			return 1
+		}
+		if rankA > rankB {
+			return -1
+		}
+		return 0
+	})
+
+	prSum := 0.0
+	for _, v := range pr {
+		prSum += v
+	}
+
+	fmt.Printf("%d cross-references in the corpus.\n", corp.TotalLinks())
+	fmt.Println()
+	fmt.Println("Top three articles by most cross-references:")
 	fmt.Printf("1. %s with %d links, last link: %s\n", urls[0], len(a), a[len(a)-1])
 	fmt.Printf("2. %s with %d links, last link: %s\n", urls[1], len(b), b[len(b)-1])
 	fmt.Printf("3. %s with %d links, last link: %s\n", urls[2], len(c), c[len(c)-1])
+	fmt.Println()
+	fmt.Println("Top three articles by PageRank:")
+	fmt.Printf("1. %s at %f \n", prSortedUrls[0], pr[prSortedUrls[0]])
+	fmt.Printf("1. %s at %f \n", prSortedUrls[1], pr[prSortedUrls[1]])
+	fmt.Printf("1. %s at %f \n", prSortedUrls[2], pr[prSortedUrls[2]])
+	fmt.Println()
+	fmt.Printf("PageRank sums to: %f\n", prSum)
 }

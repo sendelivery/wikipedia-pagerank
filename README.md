@@ -6,9 +6,35 @@ How fun! :)
 
 Built to learn Go.
 
-# Development
+## Usage
 
-## Getting Started
+```
+$ make build
+$ ./bin/wikipedia-pagerank
+Enter a Wikipedia URL: https://en.wikipedia.org/wiki/Albert_Camus
+Building corpus.........................
+Enforcing corpus consistency.
+Calculating pagerank.
+
+Size of corpus: 1000
+181428 cross-references in the corpus.
+
+Top three articles by most cross-references:
+1. /wiki/Albert_Camus with 1035 links, last link: /wiki/J%C3%BCrgen_Habermas
+2. /wiki/Friedrich_Nietzsche with 998 links, last link: /wiki/OCLC_(identifier)
+3. /wiki/Max_Weber with 801 links, last link: /wiki/Jean_Baudrillard
+
+Top three articles by PageRank:
+1. /wiki/Main_Page at 0.252343 
+1. /wiki/ISBN_(identifier) at 0.102934 
+1. /wiki/Doi_(identifier) at 0.068566 
+
+PageRank sums to: 0.994319
+```
+
+## Development
+
+### Getting Started
 
 This project uses the following dependencies in the [Makefile](Makefile):
 

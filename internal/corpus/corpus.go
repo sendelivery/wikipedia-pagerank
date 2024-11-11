@@ -7,8 +7,9 @@ import (
 )
 
 type Corpus struct {
-	syncmap sync.Map
-	size    atomic.Int64
+	syncmap    sync.Map
+	size       atomic.Int64
+	totalLinks atomic.Int64
 }
 
 // Read-only method, we won't be modifying the map so a value receiver is fine.
@@ -33,9 +34,18 @@ func (c *Corpus) Size() int {
 	return int(c.size.Load())
 }
 
+func (c *Corpus) TotalLinks() int {
+	return int(c.totalLinks.Load())
+}
+
 func (c *Corpus) Set(key string, value []string) {
-	if _, ok := c.syncmap.Load(key); !ok {
+	oldVal, ok := c.Get(key)
+	if !ok {
 		c.size.Add(1)
+		c.totalLinks.Add(int64(len(value)))
+	} else {
+		diff := len(value) - len(oldVal)
+		c.totalLinks.Add(int64(diff))
 	}
 	c.syncmap.Store(key, value)
 }
@@ -50,7 +60,7 @@ func (c *Corpus) Get(key string) (value []string, ok bool) {
 	return v, true
 }
 
-func (c *Corpus) ForEach(f func(string, []string)) {
+func (c *Corpus) ForEach(f func(page string, links []string)) {
 	c.syncmap.Range(func(key, value any) bool {
 		k, _ := key.(string)
 		v, _ := value.([]string)
@@ -61,26 +71,27 @@ func (c *Corpus) ForEach(f func(string, []string)) {
 	})
 }
 
-func (c *Corpus) EnsureConsistency() {
+func (c *Corpus) EnforceConsistency() {
+	// A comparison function, for sorting unknown pages to the end of their list.
+	sortUnknownPages := func(a, b string) int {
+		_, aOk := c.Get(a)
+		_, bOk := c.Get(b)
+
+		if aOk && !bOk {
+			return -1
+		}
+		if !aOk && bOk {
+			return 1
+		}
+
+		return 0
+	}
+
 	c.ForEach(func(page string, links []string) {
-		linksToRemove := 0
-
-		// Sort the links so that unknown pages are at the end.
-		slices.SortFunc(links, func(a, b string) int {
-			_, aOk := c.Get(a)
-			_, bOk := c.Get(b)
-
-			if aOk && !bOk {
-				return -1
-			}
-			if !aOk && bOk {
-				return 1
-			}
-
-			return 0
-		})
+		slices.SortFunc(links, sortUnknownPages)
 
 		// Count the number of unknown pages.
+		linksToRemove := 0
 		for _, link := range links {
 			if _, ok := c.Get(link); !ok {
 				linksToRemove++
@@ -89,35 +100,8 @@ func (c *Corpus) EnsureConsistency() {
 
 		// Adjust the corpus by removing the unknown pages.
 		end := len(links) - linksToRemove
-		c.syncmap.Store(page, links[:end])
+		c.Set(page, links[:end])
 	})
-
-}
-
-func (c *Corpus) CheckConsistency() {
-	unknownPages := make(map[string]struct{})
-
-	// Find all unknown pages.
-	c.ForEach(func(page string, links []string) {
-		for _, link := range links {
-			if _, ok := c.Get(link); !ok {
-				unknownPages[link] = struct{}{}
-			}
-		}
-	})
-
-	// Print unknown pages.
-	for page := range unknownPages {
-		println("Unknown page:", page)
-	}
-}
-
-func (c *Corpus) GetTotalLinks() int {
-	total := 0
-	c.ForEach(func(_ string, links []string) {
-		total += len(links)
-	})
-	return total
 }
 
 func New(size int) Corpus {
