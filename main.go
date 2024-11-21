@@ -3,60 +3,50 @@ package main
 import (
 	"fmt"
 	"log"
-	"math/rand/v2"
+	"os"
 	"slices"
 	"sync"
-	"time"
 
+	"github.com/sendelivery/wikipedia-pagerank/internal/config"
 	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
 	"github.com/sendelivery/wikipedia-pagerank/internal/pagerank"
 	"github.com/sendelivery/wikipedia-pagerank/internal/reporter"
 	"github.com/sendelivery/wikipedia-pagerank/internal/scraper"
 )
 
-const NUM_CONCURRENT_FETCHES = 100
-const NUM_PAGES = 1000
-
-// InputWikipediaArticlePath prompts the user to input a Wikipedia article path
-// and returns that path.
-func InputWikipediaArticlePath() string {
-	fmt.Printf("Enter a Wikipedia URL: https://en.wikipedia.org")
-	time.Sleep(500)
-	path := "/wiki/Albert_Camus"
-	for _, r := range path {
-		fmt.Printf("%c", r)
-		d := time.Duration(rand.IntN(20) + 20)
-		time.Sleep(d * time.Millisecond)
-	}
-	fmt.Println()
-	return path
-}
-
 func main() {
-	parentArticlePath := InputWikipediaArticlePath()
+	if len(os.Args) != 2 {
+		msg := "Usage: %s <Wikipedia article path>\nExample: %s /wiki/Go_(programming_language)\n"
+		log.Fatalf(msg, os.Args[0], os.Args[0])
+	}
+	parentArticlePath := os.Args[1]
+
 	valid := scraper.IsValidWikiPath(parentArticlePath)
 	if !valid {
 		log.Fatalf("Invalid Wikipedia path: %s\nPlease try again.", parentArticlePath)
 	}
 
+	cfg := config.DefaultConfig()
+	// ctx := config.ContextWithConfig(context.Background(), cfg)
+
 	// Create a buffered channel that we'll use as a queue to hold all the pages we have yet to
 	// fetch.
-	queue := make(chan string, NUM_PAGES)
+	queue := make(chan string, cfg.NumPages)
 	queue <- parentArticlePath
 
 	// `corp` will hold the corpus of wikipedia pages we're building.
-	corp := corpus.New(NUM_PAGES)
+	corp := corpus.New(cfg.NumPages)
 
 	r := reporter.New()
 	r.NewWorkInProgress("Building corpus")
 
-	for corp.Size() < NUM_PAGES {
+	for corp.Size() < cfg.NumPages {
 		if len(queue) == 0 {
 			// fmt.Println("Queue is empty... exiting.")
 			return
 		}
 
-		numStartGoroutines := min(len(queue), NUM_CONCURRENT_FETCHES, NUM_PAGES-corp.Size())
+		numStartGoroutines := min(len(queue), cfg.NumConcurrentFetches, cfg.NumPages-corp.Size())
 
 		var wg sync.WaitGroup
 		wg.Add(numStartGoroutines)
@@ -66,7 +56,7 @@ func main() {
 				defer wg.Done()
 
 				path := <-queue
-				articles, err := scraper.ScrapeArticlesInWikipediaArticle(path)
+				articles, err := scraper.ScrapeArticlesInWikipediaArticle(path, cfg.Logger)
 				if err != nil {
 					// fmt.Println("error when fetching path:", path, "\nwith:", err)
 					return
@@ -110,7 +100,7 @@ func main() {
 	r.Stop()
 
 	fmt.Println()
-	fmt.Println("Size of corpus:", corp.Size())
+	fmt.Println(corp.Size(), "pages in the corpus.")
 	printResults(&corp, urls, pr)
 }
 

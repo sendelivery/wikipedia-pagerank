@@ -21,12 +21,17 @@ func (r *Reporter) NewWorkInProgress(label string) {
 	fmt.Print(label)
 	go func() {
 		defer fmt.Println()
-		for {
+		for i := 1; ; i++ {
 			select {
 			case <-r.quit:
 				return
 			default:
-				fmt.Print(".")
+				if i%4 == 0 {
+					// Remove the last 3 characters from the terminal.
+					fmt.Print("\b\b\b   \b\b\b")
+				} else {
+					fmt.Print(".")
+				}
 			}
 			time.Sleep(1 * time.Second)
 		}

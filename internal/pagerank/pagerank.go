@@ -7,6 +7,7 @@ import (
 )
 
 const DAMPING_FACTOR = 0.85
+const CONVERGENCE_THRESHOLD = 0.0001
 
 // Return a probability distribution over which page to visit next, given a current page.
 // With probability `damping_factor`, choose a link at random linked to by `page`.
@@ -73,7 +74,8 @@ func CalculatePagerank(corp *corpus.Corpus) map[string]float64 {
 		})
 	})
 
-	defaultPageRank := float64(1 / corp.Size())
+	defaultPageRank := 1.0 / float64(corp.Size())
+
 	pageRank := make(map[string]float64, corp.Size())
 	pageRankDiff := make(map[string]float64, corp.Size())
 
@@ -85,7 +87,6 @@ func CalculatePagerank(corp *corpus.Corpus) map[string]float64 {
 			for _, linkingPage := range linksTo[page] {
 				prVal, ok := pageRank[linkingPage]
 				if !ok {
-					pageRank[linkingPage] = defaultPageRank
 					prVal = defaultPageRank
 				}
 				links, _ := corp.Get(linkingPage)
@@ -97,23 +98,29 @@ func CalculatePagerank(corp *corpus.Corpus) map[string]float64 {
 			newRank := (1-DAMPING_FACTOR)/float64(corp.Size()) + (DAMPING_FACTOR * pChosePage)
 			oldRank, ok := pageRank[page]
 			if !ok {
-				pageRank[page] = defaultPageRank
 				oldRank = defaultPageRank
 			}
-
-			// Calculate the difference in new page rank from the previous
 			pageRankDiff[page] = math.Abs(newRank - oldRank)
 			pageRank[page] = newRank
 
-			// Keep calculating page ranks until none change by more than 0.001
+			// Keep calculating page ranks until none change by more than the convergence threshold
 			iterate = false
 			for _, diff := range pageRankDiff {
-				if diff >= 0.001 {
+				if diff >= CONVERGENCE_THRESHOLD {
 					iterate = true
 					break
 				}
 			}
 		})
+	}
+
+	// Normalise PageRank values to sum to 1
+	prSum := 0.0
+	for _, rank := range pageRank {
+		prSum += rank
+	}
+	for page := range pageRank {
+		pageRank[page] /= prSum
 	}
 
 	return pageRank

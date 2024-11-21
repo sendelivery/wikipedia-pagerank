@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-.PHONY:fmt vet build
+.PHONY:fmt vet build run-example
 fmt:
 	go fmt ./...
 vet: fmt
@@ -9,3 +9,5 @@ vet: fmt
 	govulncheck ./...
 build: vet
 	go build -o bin/ ./...
+run-example:
+	./bin/wikipedia-pagerank /wiki/Computer_science
