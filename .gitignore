@@ -2,3 +2,6 @@
 
 # Go binary
 bin/
+
+# Log files
+*.log

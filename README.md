@@ -1,6 +1,6 @@
 # wikipedia-pagerank
 
-Type in any Wikipedia article and this program will build a corpus of Wikipedia articles by scraping the hyperlinks of each page. Then, it'll calculate the pagerank of each article in that corpus, printing out the result!
+Provide any Wikipedia article path and this program will build a corpus of Wikipedia articles by scraping the hyperlinks of each page. Then, it'll calculate the pagerank of each article in that corpus, printing out the result!
 
 How fun! :)
 
@@ -8,29 +8,60 @@ Built to learn Go.
 
 ## Usage
 
-```
-$ make build
-$ ./bin/wikipedia-pagerank
-Enter a Wikipedia URL: https://en.wikipedia.org/wiki/Albert_Camus
-Building corpus.........................
-Enforcing corpus consistency.
-Calculating pagerank.
+Once [built](#build-the-project), you can run the program with a Wikipedia article path as an argument. For example:
 
-Size of corpus: 1000
-181428 cross-references in the corpus.
+```
+$ ./bin/wikipedia-pagerank /wiki/Computer_science
+Building corpus...
+Calculating PageRank..
+
+3000 pages in the corpus.
+277497 cross-references in the corpus.
 
 Top three articles by most cross-references:
-1. /wiki/Albert_Camus with 1035 links, last link: /wiki/J%C3%BCrgen_Habermas
-2. /wiki/Friedrich_Nietzsche with 998 links, last link: /wiki/OCLC_(identifier)
-3. /wiki/Max_Weber with 801 links, last link: /wiki/Jean_Baudrillard
+1. /wiki/Artificial_intelligence with 2142 links
+2. /wiki/Glossary_of_artificial_intelligence with 1284 links
+3. /wiki/Glossary_of_computer_science with 699 links
 
 Top three articles by PageRank:
-1. /wiki/Main_Page at 0.252343 
-1. /wiki/ISBN_(identifier) at 0.102934 
-1. /wiki/Doi_(identifier) at 0.068566 
+1. /wiki/The_New_York_Times at 0.016329 
+1. /wiki/The_Guardian at 0.007479 
+1. /wiki/The_Wall_Street_Journal at 0.007251 
 
-PageRank sums to: 0.994319
+PageRank sums to: 1.000000
 ```
+
+### Build the Project
+
+There are a number of ways to build this project, the simplest being:
+
+```sh
+go build -o bin/
+```
+
+If you have GNU Make installed, you can also run one of the following:
+
+- Build to `./bin/`:
+
+    ```sh
+    make build
+    ```
+
+-  Vets the code using `go vet`, `staticcheck`, and `govulncheck`, then builds to ./bin/
+
+    Requires [staticcheck](https://staticcheck.dev/) and [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) to be installed and available in your path.
+
+    ```sh
+    make build-vet
+    ```
+
+- You can also build and immediately run the program with an example argument.
+
+    This method also requires staticcheck and govulncheck to be installed and available in your path.
+
+    ```sh
+    make build-run
+    ```
 
 ## Development
 

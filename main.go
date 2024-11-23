@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 	"sync"
 
 	"github.com/sendelivery/wikipedia-pagerank/internal/config"
 	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
 	"github.com/sendelivery/wikipedia-pagerank/internal/pagerank"
+	"github.com/sendelivery/wikipedia-pagerank/internal/queue"
 	"github.com/sendelivery/wikipedia-pagerank/internal/scraper"
 )
 
@@ -29,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(slog.LevelInfo)
 	ctx := config.ContextWithConfig(context.Background(), cfg)
 
 	cfg.Reporter.NewWorkInProgress("Building corpus")
@@ -50,56 +52,104 @@ func buildCorpus(ctx context.Context, parentArticlePath string) *corpus.Corpus {
 		log.Fatal("Failed to get config from context.")
 	}
 
-	// Create a buffered channel that we'll use as a queue to hold all the pages we have yet to
-	// fetch.
-	queue := make(chan string, cfg.NumPages)
-	queue <- parentArticlePath
+	sem := make(chan struct{}, cfg.NumConcurrentFetches) // A "semaphore" to limit concurrent fetches
+	defer close(sem)
+
+	sizedQueue := queue.NewSizedQueue(cfg.NumPages)
+	defer sizedQueue.Close()
+	sizedQueue.Enqueue(parentArticlePath)
 
 	corp := corpus.New()
 
-	for corp.Size() < cfg.NumPages {
-		if len(queue) == 0 {
-			cfg.Logger.Info("Queue is empty, unable to build full corpus", slog.Int("final_size", corp.Size()))
-			return &corp
+	var wg sync.WaitGroup
+
+	// Initial parent pass to populate the queue
+	cfg.Logger.Debug("Starting parent pass")
+	wg.Add(1)
+	sem <- struct{}{} // Acquire a slot
+	go processPathInQueue(ctx, sizedQueue, &corp, sem, &wg)
+	wg.Wait()
+
+	// Main NumPages pass
+	cfg.Logger.Debug("Starting main pass", slog.Int("num_pages", cfg.NumPages))
+	for i := 0; i < cfg.NumPages-1; i++ {
+		wg.Add(1)
+		sem <- struct{}{} // Acquire a slot
+		go processPathInQueue(ctx, sizedQueue, &corp, sem, &wg)
+
+		// This will prevent the program from hanging if the queue is empty and all goroutines are
+		// waiting for a slot.
+		if sizedQueue.Empty() {
+			cfg.Logger.Debug(
+				"Queue is empty, waiting for remaining goroutines",
+				slog.Int("num_pages", cfg.NumPages),
+			)
+			wg.Wait()
+			if sizedQueue.Empty() {
+				cfg.Logger.Debug("Queue is still empty, returning incomplete corpus", slog.Int("num_pages", cfg.NumPages))
+				return &corp
+			}
+		}
+	}
+	wg.Wait()
+
+	// Error correction pass
+	cfg.Logger.Debug("Starting error correction pass")
+	for i := 1; ; i++ {
+		numGoroutines := min(cfg.NumConcurrentFetches, cfg.NumPages-corp.Size(), sizedQueue.Length())
+		if numGoroutines == 0 {
+			break
 		}
 
-		numStartGoroutines := min(len(queue), cfg.NumConcurrentFetches, cfg.NumPages-corp.Size())
+		cfg.Logger.Debug("Error correction #"+strconv.Itoa(i), slog.Int("num_goroutines", numGoroutines))
 
-		var wg sync.WaitGroup
-		wg.Add(numStartGoroutines)
-
-		for i := numStartGoroutines; i > 0; i-- {
-			go func() {
-				defer wg.Done()
-
-				path := <-queue
-				articles, err := scraper.ScrapeArticlesInWikipediaArticle(path, cfg.Logger)
-				if err != nil {
-					cfg.Logger.Error("error when scraping "+path, slog.Any("err", err))
-					return
-				}
-
-				corp.Set(path, articles)
-
-				for _, articlePath := range articles {
-					if _, ok := corp.Get(articlePath); ok {
-						cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "already in corpus"))
-						continue
-					}
-					select {
-					case queue <- articlePath:
-					default:
-						cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "queue is full"))
-						goto end_goroutine
-					}
-				}
-			end_goroutine:
-			}()
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			sem <- struct{}{} // Acquire a slot
+			go processPathInQueue(ctx, sizedQueue, &corp, sem, &wg)
 		}
-
 		wg.Wait()
 	}
+
 	return &corp
+}
+
+func processPathInQueue(ctx context.Context, queue *queue.SizedQueue, corp *corpus.Corpus, sem chan struct{}, wg *sync.WaitGroup) {
+	cfg, ok := config.ConfigFromContext(ctx)
+	if !ok {
+		log.Fatal("Failed to get config from context.")
+	}
+
+	defer wg.Done()          // Decrement the wait group
+	defer func() { <-sem }() // Release the slot
+
+	path, ok := queue.Dequeue()
+	if !ok {
+		cfg.Logger.Debug("Queue is empty", slog.String("reason", "no more elements"))
+		return
+	}
+
+	articles, err := scraper.ScrapeArticlesInWikipediaArticle(path, cfg.Logger)
+	if err != nil {
+		cfg.Logger.Debug("error when scraping "+path, slog.Any("err", err))
+		return
+	}
+
+	cfg.Logger.Debug("Setting links for "+path+" in corpus", slog.Int("num_links", len(articles)))
+	corp.Set(path, articles)
+
+	cfg.Logger.Debug("Iterating through links, adding to queue", slog.Int("num_links", len(articles)))
+	for _, articlePath := range articles {
+		if queue.Full() {
+			cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "queue is full"))
+			break
+		}
+		if ok := queue.Enqueue(articlePath); !ok {
+			cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "already in queue"))
+			continue
+		}
+		cfg.Logger.Debug("Added to the queue", slog.String("link", articlePath))
+	}
 }
 
 func printResults(corp *corpus.Corpus, pr map[string]float64) {
@@ -157,9 +207,9 @@ func printResults(corp *corpus.Corpus, pr map[string]float64) {
 	fmt.Printf("%d cross-references in the corpus.\n", corp.TotalLinks())
 	fmt.Println()
 	fmt.Println("Top three articles by most cross-references:")
-	fmt.Printf("1. %s with %d links, last link: %s\n", urls[0], len(a), a[len(a)-1])
-	fmt.Printf("2. %s with %d links, last link: %s\n", urls[1], len(b), b[len(b)-1])
-	fmt.Printf("3. %s with %d links, last link: %s\n", urls[2], len(c), c[len(c)-1])
+	fmt.Printf("1. %s with %d links\n", urls[0], len(a))
+	fmt.Printf("2. %s with %d links\n", urls[1], len(b))
+	fmt.Printf("3. %s with %d links\n", urls[2], len(c))
 	fmt.Println()
 	fmt.Println("Top three articles by PageRank:")
 	fmt.Printf("1. %s at %f \n", prSortedUrls[0], pr[prSortedUrls[0]])

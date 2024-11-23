@@ -21,7 +21,7 @@ var blacklist = map[string]bool{
 }
 
 func isBlacklisted(url string) bool {
-	if blacklist[url] || strings.Contains(url, "_(identifier)") {
+	if blacklist[url] || strings.Contains(url, "_(identifier)") || strings.Contains(url, "_(disambiguation)") {
 		return true
 	}
 	return false
@@ -45,7 +45,7 @@ func ScrapeArticlesInWikipediaArticle(article string, l *slog.Logger) ([]string,
 	}
 
 	paths := extractWikipediaArticleLinks(articleHtml)
-	l.Info("scraped"+article, slog.Int("num_links", len(paths)))
+	l.Info("scraped "+article, slog.Int("num_links", len(paths)))
 	return paths, nil
 }
 
@@ -67,7 +67,7 @@ func getArticleHTML(path string) (*html.Node, error) {
 }
 
 func extractWikipediaArticleLinks(article *html.Node) []string {
-	links := make([]string, 0)
+	links := make([]string, 0, 100)
 
 	var traverseNodes func(*html.Node)
 	traverseNodes = func(node *html.Node) {
@@ -86,7 +86,6 @@ func extractWikipediaArticleLinks(article *html.Node) []string {
 			}
 		}
 	}
-
 	// fmt.Println("Scraping wikipedia links from HTML")
 	traverseNodes(article)
 	return links

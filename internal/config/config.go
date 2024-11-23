@@ -41,13 +41,13 @@ type Config struct {
 }
 
 // DefaultConfig returns the default configuration.
-func DefaultConfig() *Config {
+func DefaultConfig(logLevel slog.Level) *Config {
 	return &Config{
-		NumConcurrentFetches: 100,
-		NumPages:             1500,
+		NumConcurrentFetches: 50,
+		NumPages:             500,
 		OutputDir:            "output",
-		LogLevel:             slog.LevelInfo,
-		Logger:               logger.MakeLogger(slog.LevelInfo, "log"),
+		LogLevel:             logLevel,
+		Logger:               logger.MakeLogger(logLevel, "run.log"),
 		Reporter:             reporter.New(),
 		ConvergenceThreshold: 0.0001,
 		DampingFactor:        0.85,
