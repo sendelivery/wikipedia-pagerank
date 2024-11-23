@@ -13,8 +13,8 @@ type Reporter struct {
 	quit chan any
 }
 
-func New() Reporter {
-	return Reporter{make(chan any)}
+func New() *Reporter {
+	return &Reporter{make(chan any)}
 }
 
 func (r *Reporter) NewWorkInProgress(label string) {

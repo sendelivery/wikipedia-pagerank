@@ -6,38 +6,29 @@ import (
 	"sync/atomic"
 )
 
+// Corpus is a map of pages to their links.
 type Corpus struct {
-	syncmap    sync.Map
-	size       atomic.Int64
+	// syncmap is a map of pages to their links, supporting concurrent access via a mutex.
+	syncmap sync.Map
+
+	// size is the number of pages in the corpus.
+	size atomic.Int64
+
+	// totalLinks is the total number of cross-references in the corpus.
 	totalLinks atomic.Int64
 }
 
-// Read-only method, we won't be modifying the map so a value receiver is fine.
-// func (c Corpus) GetRandomLink(page string) (string, error) {
-// 	links, ok := c[page]
-
-// 	if !ok {
-// 		return "", errors.New("page does not exist in corpus")
-// 	}
-
-// 	i := rand.Intn(len(links))
-// 	link := links[i]
-
-// 	if _, ok := c[link]; !ok {
-// 		return "", errors.New("link does not exist in corpus")
-// 	}
-
-// 	return link, nil
-// }
-
+// Size returns the number of pages in the corpus.
 func (c *Corpus) Size() int {
 	return int(c.size.Load())
 }
 
+// TotalLinks returns the total number of cross-references in the corpus.
 func (c *Corpus) TotalLinks() int {
 	return int(c.totalLinks.Load())
 }
 
+// Set adds a page to the corpus, or updates the links for an existing page.
 func (c *Corpus) Set(key string, value []string) {
 	oldVal, ok := c.Get(key)
 	if !ok {
@@ -50,6 +41,7 @@ func (c *Corpus) Set(key string, value []string) {
 	c.syncmap.Store(key, value)
 }
 
+// Get returns the links for a page in the corpus.
 func (c *Corpus) Get(key string) (value []string, ok bool) {
 	val, ok := c.syncmap.Load(key)
 	if !ok {
@@ -60,6 +52,7 @@ func (c *Corpus) Get(key string) (value []string, ok bool) {
 	return v, true
 }
 
+// ForEach iterates over the pages in the corpus, calling the given function for each page.
 func (c *Corpus) ForEach(f func(page string, links []string)) {
 	c.syncmap.Range(func(key, value any) bool {
 		k, _ := key.(string)
@@ -71,6 +64,7 @@ func (c *Corpus) ForEach(f func(page string, links []string)) {
 	})
 }
 
+// EnforceConsistency removes any links to pages that are not in the corpus.
 func (c *Corpus) EnforceConsistency() {
 	// A comparison function, for sorting unknown pages to the end of their list.
 	sortUnknownPages := func(a, b string) int {
@@ -104,6 +98,7 @@ func (c *Corpus) EnforceConsistency() {
 	})
 }
 
-func New(size int) Corpus {
+// New creates a new, empty corpus.
+func New() Corpus {
 	return Corpus{}
 }

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/sendelivery/wikipedia-pagerank/internal/logger"
+	"github.com/sendelivery/wikipedia-pagerank/internal/reporter"
 )
 
 type key int
@@ -23,8 +24,14 @@ type Config struct {
 	// OutputDir is the directory to write the output to.
 	OutputDir string
 
+	// LogLevel is the level of logging to use.
+	LogLevel slog.Level
+
 	// Logger is the logger to use.
 	Logger *slog.Logger
+
+	// Reporter prints the progress of the application to Stdout.
+	Reporter *reporter.Reporter
 
 	// ConvergenceThreshold is the threshold for the PageRank algorithm to converge.
 	ConvergenceThreshold float64
@@ -36,10 +43,12 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		NumConcurrentFetches: 50,
-		NumPages:             1000,
+		NumConcurrentFetches: 100,
+		NumPages:             1500,
 		OutputDir:            "output",
-		Logger:               logger.MakeLogger("log"),
+		LogLevel:             slog.LevelInfo,
+		Logger:               logger.MakeLogger(slog.LevelInfo, "log"),
+		Reporter:             reporter.New(),
 		ConvergenceThreshold: 0.0001,
 		DampingFactor:        0.85,
 	}
@@ -52,6 +61,6 @@ func ContextWithConfig(ctx context.Context, cfg *Config) context.Context {
 
 // ConfigFromContext returns the configuration from the given context.
 func ConfigFromContext(ctx context.Context) (*Config, bool) {
-	cfg, ok := ctx.Value(configKey).(Config)
-	return &cfg, ok
+	cfg, ok := ctx.Value(configKey).(*Config)
+	return cfg, ok
 }

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"slices"
 	"sync"
@@ -10,40 +12,55 @@ import (
 	"github.com/sendelivery/wikipedia-pagerank/internal/config"
 	"github.com/sendelivery/wikipedia-pagerank/internal/corpus"
 	"github.com/sendelivery/wikipedia-pagerank/internal/pagerank"
-	"github.com/sendelivery/wikipedia-pagerank/internal/reporter"
 	"github.com/sendelivery/wikipedia-pagerank/internal/scraper"
 )
 
 func main() {
 	if len(os.Args) != 2 {
 		msg := "Usage: %s <Wikipedia article path>\nExample: %s /wiki/Go_(programming_language)\n"
-		log.Fatalf(msg, os.Args[0], os.Args[0])
+		fmt.Printf(msg, os.Args[0], os.Args[0])
+		os.Exit(1)
 	}
-	parentArticlePath := os.Args[1]
 
-	valid := scraper.IsValidWikiPath(parentArticlePath)
-	if !valid {
-		log.Fatalf("Invalid Wikipedia path: %s\nPlease try again.", parentArticlePath)
+	path := os.Args[1]
+
+	if !scraper.IsValidWikiPath(path) {
+		fmt.Printf("Invalid Wikipedia path: %s\nPlease try again.", path)
+		os.Exit(1)
 	}
 
 	cfg := config.DefaultConfig()
-	// ctx := config.ContextWithConfig(context.Background(), cfg)
+	ctx := config.ContextWithConfig(context.Background(), cfg)
+
+	cfg.Reporter.NewWorkInProgress("Building corpus")
+	corp := buildCorpus(ctx, path)
+	cfg.Reporter.Stop()
+
+	cfg.Reporter.NewWorkInProgress("Calculating PageRank")
+	corp.EnforceConsistency()
+	pr := pagerank.CalculatePagerank(corp)
+	cfg.Reporter.Stop()
+
+	printResults(corp, pr)
+}
+
+func buildCorpus(ctx context.Context, parentArticlePath string) *corpus.Corpus {
+	cfg, ok := config.ConfigFromContext(ctx)
+	if !ok {
+		log.Fatal("Failed to get config from context.")
+	}
 
 	// Create a buffered channel that we'll use as a queue to hold all the pages we have yet to
 	// fetch.
 	queue := make(chan string, cfg.NumPages)
 	queue <- parentArticlePath
 
-	// `corp` will hold the corpus of wikipedia pages we're building.
-	corp := corpus.New(cfg.NumPages)
-
-	r := reporter.New()
-	r.NewWorkInProgress("Building corpus")
+	corp := corpus.New()
 
 	for corp.Size() < cfg.NumPages {
 		if len(queue) == 0 {
-			// fmt.Println("Queue is empty... exiting.")
-			return
+			cfg.Logger.Info("Queue is empty, unable to build full corpus", slog.Int("final_size", corp.Size()))
+			return &corp
 		}
 
 		numStartGoroutines := min(len(queue), cfg.NumConcurrentFetches, cfg.NumPages-corp.Size())
@@ -58,7 +75,7 @@ func main() {
 				path := <-queue
 				articles, err := scraper.ScrapeArticlesInWikipediaArticle(path, cfg.Logger)
 				if err != nil {
-					// fmt.Println("error when fetching path:", path, "\nwith:", err)
+					cfg.Logger.Error("error when scraping "+path, slog.Any("err", err))
 					return
 				}
 
@@ -66,12 +83,13 @@ func main() {
 
 				for _, articlePath := range articles {
 					if _, ok := corp.Get(articlePath); ok {
+						cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "already in corpus"))
 						continue
 					}
 					select {
 					case queue <- articlePath:
 					default:
-						// Queue is full.
+						cfg.Logger.Debug("Skipping "+articlePath, slog.String("reason", "queue is full"))
 						goto end_goroutine
 					}
 				}
@@ -81,9 +99,10 @@ func main() {
 
 		wg.Wait()
 	}
+	return &corp
+}
 
-	r.Stop()
-
+func printResults(corp *corpus.Corpus, pr map[string]float64) {
 	// Must set cap of urls to the number of pages in the corpus or else the ForEach will overwrite
 	// the pointer of the inner slice, and `urls` will be empty.
 	urls := make([]string, 0, corp.Size())
@@ -91,20 +110,6 @@ func main() {
 		urls = append(urls, url)
 	})
 
-	r.NewWorkInProgress("Enforcing corpus consistency")
-	corp.EnforceConsistency()
-	r.Stop()
-
-	r.NewWorkInProgress("Calculating pagerank")
-	pr := pagerank.CalculatePagerank(&corp)
-	r.Stop()
-
-	fmt.Println()
-	fmt.Println(corp.Size(), "pages in the corpus.")
-	printResults(&corp, urls, pr)
-}
-
-func printResults(corp *corpus.Corpus, urls []string, pr map[string]float64) {
 	slices.SortFunc(urls, func(a, b string) int {
 		aArr, _ := corp.Get(a)
 		bArr, _ := corp.Get(b)
@@ -147,6 +152,8 @@ func printResults(corp *corpus.Corpus, urls []string, pr map[string]float64) {
 		prSum += v
 	}
 
+	fmt.Println()
+	fmt.Println(corp.Size(), "pages in the corpus.")
 	fmt.Printf("%d cross-references in the corpus.\n", corp.TotalLinks())
 	fmt.Println()
 	fmt.Println("Top three articles by most cross-references:")

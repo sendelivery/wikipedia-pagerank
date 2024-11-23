@@ -7,12 +7,12 @@ import (
 )
 
 // MakeLogger creates a new logger that writes to a `log` file in the current directory.
-func MakeLogger(logfile string) *slog.Logger {
+func MakeLogger(logLevel slog.Level, logfile string) *slog.Logger {
 	file, err := os.Create(logfile)
 	if err != nil {
 		log.Fatalf("Failed to create log file: %s", err)
 	}
-	options := &slog.HandlerOptions{Level: slog.LevelDebug}
+	options := &slog.HandlerOptions{Level: logLevel}
 	handler := slog.NewJSONHandler(file, options)
 	return slog.New(handler)
 }
